@@ -1,0 +1,12 @@
+# 大文件不入库：这些都能用 scripts/ 里的脚本重新生成
+models/
+data/pdf/
+*.npy
+*.pkl
+*.part
+data/chunks.jsonl
+data/extra_chunks.jsonl
+out/eval_raw.json
+
+__pycache__/
+*.pyc
