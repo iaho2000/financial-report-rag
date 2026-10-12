@@ -17,8 +17,13 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDF_DIR = os.path.join(BASE, "data", "pdf")
 OUT = os.path.join(BASE, "data", "chunks.jsonl")
 
-CHUNK = 800          # 每块目标字数
-OVERLAP = 120        # 重叠字数
+CHUNK = 420          # 每块目标字数
+OVERLAP = 60         # 重叠字数
+# 为什么是 420 而不是常见的 800：向量模型 bge-small-zh-v1.5 的窗口只有 512 token，
+# 而中文财报里平均 1 token ≈ 2.1 字。实测按 800 字切时 34.8% 的块超窗（最长 2044
+# token），超窗部分被模型静默截掉——被截掉的又常是表格的后几行。
+# 420 字对应 95% 分位约 430 token，留出安全边界。
+TBL_MAX = 800        # 单个表格块的目标字符数，超了按行拆段
 
 SEC_RE = re.compile(r"第\s*([一二三四五六七八九十]+)\s*节\s*([^\n]{0,30})")
 
@@ -41,24 +46,42 @@ def as_heading(txt):
 
 
 def table_to_md(rows):
-    """二维列表 -> markdown 表格；丢掉全空行列"""
+    """二维列表 -> markdown 表格，返回**多段**（大表按行拆，每段都重贴表头）。
+    丢掉全空行列。"""
     rows = [[("" if c is None else str(c).replace("\n", " ").strip()) for c in r] for r in rows]
     rows = [r for r in rows if any(c for c in r)]
     if len(rows) < 2:
-        return ""
+        return []
     ncol = max(len(r) for r in rows)
     rows = [r + [""] * (ncol - len(r)) for r in rows]
     # 删掉全空列：PyMuPDF 常把单元格之间的间隙误判成独立列，
     # 不删的话「释义项|指|释义内容」会被切成 9 列
     keep = [j for j in range(ncol) if any(r[j] for r in rows)]
     if not keep:
-        return ""
+        return []
     rows = [[r[j] for j in keep] for r in rows]
+    ncol = len(keep)
     head, body = rows[0], rows[1:]
-    lines = ["| " + " | ".join(head) + " |",
-             "|" + "|".join([" --- "] * ncol) + "|"]
-    lines += ["| " + " | ".join(r) + " |" for r in body]
-    return "\n".join(lines)
+
+    def render(part):
+        lines = ["| " + " | ".join(head) + " |",
+                 "|" + "|".join([" --- "] * ncol) + "|"]
+        lines += ["| " + " | ".join(r) + " |" for r in part]
+        return "\n".join(lines)
+
+    # 一张 2000 token 的大表如果不拆，嵌进去必被截掉后半段，
+    # 而后半段的数字没有列名就等于废数据。按行拆段、每段重贴表头。
+    out, cur, size = [], [], 0
+    for r in body:
+        rl = len(" | ".join(r))
+        if cur and size + rl > TBL_MAX:
+            out.append(render(cur))
+            cur, size = [], 0
+        cur.append(r)
+        size += rl
+    if cur:
+        out.append(render(cur))
+    return out
 
 
 def load_meta():
@@ -84,8 +107,8 @@ def process_pdf(code, meta):
         try:
             finder = page.find_tables()
             for tb in finder.tables:
-                md = table_to_md(tb.extract())
-                if not md:
+                pieces = table_to_md(tb.extract())
+                if not pieces:
                     continue
                 # 表名 = 表格上方最近的一行非空文字
                 y0 = tb.bbox[1]
@@ -94,7 +117,9 @@ def process_pdf(code, meta):
                     if b[3] < y0 - 2 and (b[4] or "").strip():
                         above.append((b[3], b[4].strip().replace("\n", " ")))
                 cap = sorted(above)[-1][1][:60] if above else ""
-                tbl_texts.append(f"[表格] {cap}\n{md}")
+                for k, md in enumerate(pieces):
+                    tail = f"（第{k + 1}/{len(pieces)}段）" if len(pieces) > 1 else ""
+                    tbl_texts.append(f"[表格] {cap}{tail}\n{md}")
         except Exception:
             pass
         for ln in text.split("\n"):

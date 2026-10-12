@@ -17,7 +17,9 @@ from bm25_lib import BM25, tokenize  # noqa: E402
 
 BASE = os.path.dirname(HERE)
 DATA = os.path.join(BASE, "data")
-MODEL_DIR = os.path.join(BASE, "models", "Qwen3-Embedding-0.6B")
+# 换模型改这一个环境变量即可（05_rag.py 读同一个变量，两边不会走岔）
+EMBED_NAME = os.environ.get("RAG_EMBED_MODEL", "bge-small-zh-v1.5")
+MODEL_DIR = os.path.join(BASE, "models", EMBED_NAME)
 
 
 def load_chunks():
@@ -49,15 +51,15 @@ def main():
         from sentence_transformers import SentenceTransformer
         print("加载本地模型 ...")
         model = SentenceTransformer(MODEL_DIR, device="cpu")
-        # 必须显式设窗口：Qwen3-Embedding 原生支持 32768，但这个仓库里没有
-        # sentence_bert_config.json，ST 会退回一个很短的默认值，
-        # 把 800 字的块尾巴悄悄截掉——截掉的正好常是表格的后几行。
-        model.max_seq_length = 1024
-        _n = max(len(model.tokenizer(t, add_special_tokens=False)["input_ids"])
-                 for t in texts[:300])
-        print(f"抽样最长块 {_n} token / 窗口 {model.max_seq_length}")
-        if _n > model.max_seq_length:
-            print("!! 有块超窗口，会被截断，请把 max_seq_length 调大或把块切小")
+        # 必设窗口：不设的话 ST 会退回一个很短的默认值，把块尾巴静默截掉，
+        # 而截掉的正好常是表格的后几行。bge-small-zh-v1.5 是 BERT 结构、
+        # 位置编码只有 512，调大反而会错，所以这里就是它的上限 512。
+        model.max_seq_length = 512
+        n_over = sum(1 for t in texts
+                     if len(model.tokenizer(t, add_special_tokens=False)["input_ids"])
+                     > model.max_seq_length)
+        print(f"超窗口(>{model.max_seq_length} token)的块 {n_over}/{len(texts)}"
+              f" = {n_over / len(texts) * 100:.1f}%，这些块的尾巴会被截掉")
         emb = model.encode(texts, batch_size=16, normalize_embeddings=True,
                            show_progress_bar=True, convert_to_numpy=True)
         emb = emb.astype(np.float16)
@@ -85,7 +87,7 @@ def main():
 
     meta = {
         "n_chunks": len(chunks),
-        "model": "Qwen/Qwen3-Embedding-0.6B",
+        "model": EMBED_NAME,
         "dim": int(emb.shape[1]),
         "companies": sorted({(c["code"], c["name"]) for c in chunks}),
     }

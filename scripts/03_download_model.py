@@ -10,9 +10,13 @@ import time
 
 import requests
 
-MODEL = "Qwen/Qwen3-Embedding-0.6B"
+# 模型可从命令行换：python 03_download_model.py BAAI/bge-base-zh-v1.5
+# 默认用小模型，原因见 README「为什么用 bge-small」：
+# 实测 Qwen3-Embedding-0.6B 在这台笔记本上纯 CPU 编 9555 块要 5 小时
+# （每块 18.9 CPU 秒），bge-small-zh-v1.5 只要十几分钟。
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "BAAI/bge-small-zh-v1.5"
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEST = os.path.join(BASE, "models", "Qwen3-Embedding-0.6B")
+DEST = os.path.join(BASE, "models", MODEL.split("/")[-1])
 SKIP_EXT = (".onnx", ".msgpack", ".h5", ".tflite", ".gguf")
 SKIP_NAME = ("README.md", ".gitattributes")
 
@@ -25,10 +29,15 @@ def list_files():
     r = s.get(u, params={"Revision": "master", "Recursive": "True"}, timeout=30)
     r.raise_for_status()
     data = r.json()["Data"]["Files"]
+    # 有的仓库同时放了 model.safetensors 和 pytorch_model.bin（同样内容两份）。
+    # SentenceTransformer 优先读 safetensors，所以有 safetensors 就别下 .bin，省一半流量。
+    has_st = any(f["Path"].endswith("model.safetensors") for f in data)
     out = []
     for f in data:
         p = f["Path"]
         if f.get("Type") != "blob":
+            continue
+        if has_st and p.endswith("pytorch_model.bin"):
             continue
         if p.endswith(SKIP_EXT) or os.path.basename(p) in SKIP_NAME:
             continue

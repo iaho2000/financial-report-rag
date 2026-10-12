@@ -20,10 +20,14 @@ from bm25_lib import BM25  # noqa: E402,F401  反序列化 bm25.pkl 需要能 im
 
 BASE = os.path.dirname(HERE)
 DATA = os.path.join(BASE, "data")
-MODEL_DIR = os.path.join(BASE, "models", "Qwen3-Embedding-0.6B")
+EMBED_NAME = os.environ.get("RAG_EMBED_MODEL", "bge-small-zh-v1.5")
+MODEL_DIR = os.path.join(BASE, "models", EMBED_NAME)
 
-INSTRUCT = ("Instruct: Given a web search query, retrieve relevant passages "
-            "that answer the query\nQuery: ")
+# bge 系列的老规矩：**只给问句加指令前缀**，块不加。
+# 加了之后短问句和长块的语义空间才对得齐（bge v1.5 说可加可不加，
+# 但中文短问句实测加了好一些）。Qwen3-Embedding 用的是另一套英文 Instruct 前缀，
+# 换回它时记得把下面这行也换掉。
+INSTRUCT = "为这个句子生成表示以用于检索相关文章："
 
 SYSTEM = """你是财报分析助手。只能依据【材料】回答，不许使用材料之外的知识，不许编造数字。
 规则：
@@ -51,7 +55,7 @@ class RagEngine:
             from sentence_transformers import SentenceTransformer
             self.model = SentenceTransformer(MODEL_DIR, device="cpu")
             # 和 04 建索引时必须一致，否则问句和块不在同一个截断口径上
-            self.model.max_seq_length = 1024
+            self.model.max_seq_length = 512
         self.meta = json.load(open(os.path.join(DATA, "meta.json"), encoding="utf-8"))
 
     # ---------- 检索 ----------

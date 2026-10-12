@@ -15,9 +15,9 @@
 | --- | --- |
 | 选一个行业或一组公司（10 家以上） | 14 只（大哥自选股里的主板票） |
 | 从交易所网站下载年报/半年报全文 | 巨潮资讯网（cninfo）批量下载，存 `data/pdf/` |
-| 提取文字、**表格按行列还原** | PyMuPDF 取文本 + `find_tables()` 还原表格，并带上表名 |
-| 切块带公司、章节、页码 | 每块带 `code/name/section/page/page_end` |
-| 建**向量 + BM25** 两路索引 | 向量：Qwen3-Embedding-0.6B（本地 CPU）；BM25：jieba 分词 |
+| 提取文字、**表格按行列还原** | PyMuPDF 取文本 + `find_tables()` 还原表格、带上表名；过长的表按行拆段，每段重贴表头 |
+| 切块带公司、章节、页码 | 每块带 `code/name/section/page/page_end`；420 字/块、重叠 60 字 |
+| 建**向量 + BM25** 两路索引 | 向量：bge-small-zh-v1.5（本地 CPU，24M 参数、512 维）；BM25：jieba 分词 |
 | 做一个**能提问、答案带出处**的页面 | `06_webapp.py`，Flask 本地网页 |
 | 出 10 道题，**至少 2 道跨公司全景题** | `08_eval.py`：8 道单公司 + 2 道跨公司 |
 | 逐题记录**召回哪些块、答对没有、错在哪** | `out/eval_raw.json` + `结论.md` |
@@ -33,9 +33,11 @@
 ├─ data/
 │  ├─ pdf/             14 份半年报 PDF 原文（下载来的，原样存放，不动）
 │  ├─ stocks.json      14 家公司的代码/名称/公告信息
-│  ├─ chunks.jsonl     切好的块（9,570 块）
-│  └─ extra_chunks.jsonl  人工汇总的「速查表」块（2 块，见第四节）
-├─ models/             Qwen3-Embedding-0.6B（本地，约 1.2GB）
+│  ├─ chunks.jsonl     切好的块（13,603 块）
+│  └─ extra_chunks.jsonl  人工汇总的「速查表」块（14 块，见第四节）
+├─ models/             bge-small-zh-v1.5（本地，96MB）
+├─ 截图/               5 张页面截图（含 1 张答错的，见 结论.md 第三节）
+├─ 结论.md / 结论.pdf   一页结论（PDF 由 scripts/10_md_to_pdf.py 生成）
 └─ out/                评测结果、facts.json
 ```
 
@@ -44,8 +46,8 @@
 | 脚本 | 干什么 |
 | --- | --- |
 | `01_download.py` | 从巨潮资讯网下 14 家的 2026 半年报 PDF |
-| `02_extract.py` | PDF → 文字+表格 → 切块（800 字/重叠 120） |
-| `03_download_model.py` | 从 ModelScope 下向量模型（不翻墙、免费，带断点续传） |
+| `02_extract.py` | PDF → 文字+表格 → 切块（420 字/重叠 60） |
+| `03_download_model.py` | 从 ModelScope 下向量模型（不翻墙、免费，带断点续传）；换模型传第一个参数 |
 | `04_build_index.py` | 建索引：`vectors.npy` + `bm25.pkl` |
 | `bm25_lib.py` | BM25 实现（单独成文件，因为 pickle 要求类能被正常 import） |
 | `05_rag.py` | 检索 + 回答引擎（两路召回 → RRF 融合 → 带出处生成） |
@@ -53,28 +55,34 @@
 | `07_facts.py` | 从「主要会计数据」抠标准答案，并生成速查表块 |
 | `08_eval.py` | 10 道题的评测 |
 | `09_check_facts.py` | 反查：换一个文本来源（直接读 PDF 整页）重抠一遍，和 07 对比 |
+| `10_md_to_pdf.py` | 把 `结论.md` 转成 `结论.pdf`（作业要交 PDF；本机没有 LibreOffice/pandoc，用 Edge 无头打印） |
 
 ## 三、怎么跑
 
 ```bash
 cd scripts
 python 01_download.py        # 下 14 份 PDF（约 30MB）
-python 02_extract.py         # 切块
-python 03_download_model.py  # 下模型（约 1.2GB，可不翻墙）
-python 04_build_index.py     # 建索引（CPU 编码，几分钟）
-python 07_facts.py           # 抠标准答案 + 生成速查表块
-python 04_build_index.py     # 加了速查表块，重建一次（或用 --bm25-only）
-python 09_check_facts.py     # 反查 07 的数字（14 家 × 4 项，现为 0 处对不上）
+python 02_extract.py         # 切块 -> data/chunks.jsonl
+python 03_download_model.py  # 下模型（96MB，不翻墙）
+python 07_facts.py           # 抠标准答案 + 生成速查表块 -> data/extra_chunks.jsonl
+python 09_check_facts.py     # 反查 07 抠出来的数字（现为 0 处对不上）
+python 04_build_index.py     # 建索引（CPU 编码 13,617 块，约 10 分钟）
 python 06_webapp.py          # 打开 http://127.0.0.1:5000
 python 08_eval.py            # 跑评测
+python 10_md_to_pdf.py       # 结论.md -> 结论.pdf（交作业的附件）
 ```
+
+**顺序不能换**：`07` 必须在 `04` 之前跑。`04` 是把 `chunks.jsonl` 和
+`extra_chunks.jsonl` 一起编码的，先建索引再跑 07，那 14 个速查块就只进了
+BM25、没进向量库，跨公司题会时灵时不灵。索引已存在时 `04` 会跳过编码，
+所以要重来得先删掉 `data/vectors.npy`；`--bm25-only` 只重建 BM25，**别拿它补救**。
 
 回答生成需要一个兼容 Anthropic 接口的大模型，走环境变量
 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`（本机是 DeepSeek）。
 **密钥只从环境变量读，不写进任何文件**；没有配也能用，只是不生成文字、
 只返回召回的原文块。
 
-## 四、两个设计要点（以及踩过的坑）
+## 四、四个设计要点（以及踩过的坑）
 
 ### 1. 表格必须按行列还原，且把表名一起搬进块
 
@@ -98,6 +106,36 @@ python 08_eval.py            # 跑评测
 
 这不是作弊——真做企业知识库时，「指标速查表」本来就是人先做好的。
 但它必须**写清楚是人工汇总的**，不能假装成从原文检索出来的。
+
+### 3. 切块大小要服从向量模型的窗口，不是服从手感
+
+一开始按常见的 800 字切块，是把模型窗口当成无限的。实际两个坑：
+
+- **超窗的部分会被静默截掉**，不报错。换成 bge-small 后实测：800 字切法下
+  **34.8% 的块超过 512 token**（最长 2044），也就是说三分之一的块尾巴根本没进向量。
+  改成 420 字后，超窗降到 5.6%。
+- **表格尤其吃亏**。一张 2000 token 的大表整块塞进去，后半段必被截掉，
+  而后半段的数字没有列名就等于废数据。所以 `02_extract.py` 把过长的表
+  **按行拆段，每段重贴一遍表头**。
+- 同一条规则也适用于人工写的速查块：上一版整张汇总表是一个块（787 token）、
+  FAQ＋四个排行榜是一个块（1852 token），超窗被截，**截掉的偏偏是排在后面的
+  几家公司**。现在按条目拆成 14 块，最长 458 token。
+
+### 4. 为什么用 bge-small，而不是课件推荐的 Qwen3-Embedding-0.6B
+
+课件 P15 推荐 Qwen3-Embedding-0.6B 起步，本身没问题（1024 维、支持 32k 窗口）。
+但这台开发机**只有 CPU、没有可用的 CUDA**（`torch 2.14.1+cpu`），实测：
+
+| 模型 | 参数量 | 编 13,617 块的预计耗时 |
+| --- | --- | --- |
+| Qwen3-Embedding-0.6B | 596M | **约 5 小时**（实测每块 18.9 CPU 秒） |
+| bge-small-zh-v1.5 | 24M | **约 10 分钟** |
+
+差距来自参数量差了 25 倍，不是配置问题。作业要的是「建向量索引」这件事本身，
+不是某个特定模型，所以选了能在本机跑完的 bge-small-zh-v1.5。
+代价是窗口小（512，见上一条）和维度低（512 vs 1024）。
+想换回来只要 `set RAG_EMBED_MODEL=Qwen3-Embedding-0.6B`（两个脚本读同一个环境变量），
+但记得 `05_rag.py` 里的查询前缀也要一起换——Qwen3 用的是另一套英文 `Instruct:` 前缀。
 
 ## 五、14 家公司
 

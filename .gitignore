@@ -4,9 +4,15 @@ data/pdf/
 *.npy
 *.pkl
 *.part
+*.bak
 data/chunks.jsonl
 data/extra_chunks.jsonl
 out/eval_raw.json
+out/build_log.txt
+out/eval_log.txt
+out/webapp_log.txt
+# 转 PDF 用的中间 HTML，以及校验 PDF 时渲染出来的图
+out/_*
 
 __pycache__/
 *.pyc

@@ -106,6 +106,23 @@ const P=new URLSearchParams(location.search);
 if(P.get('mode')){const r=document.querySelector(`input[name=mode][value="${P.get('mode')}"]`);if(r)r.checked=true;}
 if(P.get('llm')==='0'){document.getElementById('llm').checked=false;}
 if(P.get('q')){document.getElementById('q').value=P.get('q');}
+// 生成模型返回的是 Markdown。原先用 textContent 直接塞，于是「**结论：**」的星号
+// 原样显示在页面上——交作业的截图里满屏星号。这里只做够用的三件事：
+// **粗体**、行首 - 的列表、段落换行；不做完整 Markdown 解析（够用即可）。
+// 先 esc 再替换，顺序不能反：反了会把模型输出里的 < > 当标签执行。
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function mdLite(s){
+  const out=[]; let inUl=false;
+  for(const raw of esc(s).split('\n')){
+    const m=raw.match(/^\s*[-*]\s+(.*)$/);
+    if(m){ if(!inUl){out.push('<ul style="margin:.3em 0 .3em 1.2em;padding:0">');inUl=true;}
+           out.push('<li>'+m[1]+'</li>'); continue; }
+    if(inUl){out.push('</ul>');inUl=false;}
+    out.push('<p style="margin:.3em 0">'+raw+'</p>');
+  }
+  if(inUl) out.push('</ul>');
+  return out.join('').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+}
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const q=document.getElementById('q').value.trim(); if(!q) return;
@@ -121,7 +138,7 @@ document.getElementById('f').onsubmit=async e=>{
     document.getElementById('ansCard').style.display='block';
     document.getElementById('srcCard').style.display='block';
     const a=document.getElementById('ans');
-    a.textContent=d.answer||'（未生成）';
+    a.innerHTML=mdLite(d.answer||'（未生成）');
     document.getElementById('ansMeta').textContent =
       d.model? ('生成模型：'+d.model+' ｜ 召回 '+d.hits.length+' 块 ｜ 检索：'+d.mode)
              : ('召回 '+d.hits.length+' 块 ｜ 检索：'+d.mode);
