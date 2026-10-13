@@ -16,9 +16,11 @@ import markdown
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASE = os.path.dirname(HERE)
-SRC = os.path.join(BASE, "结论.md")
-OUT = os.path.join(BASE, "结论.pdf")
-HTML = os.path.join(BASE, "out", "_结论.html")
+# 默认 结论.md -> 结论.pdf；也可给两个参数转别的：
+#   python 10_md_to_pdf.py 一页结论.md 一页结论.pdf
+SRC = os.path.join(BASE, sys.argv[1] if len(sys.argv) > 1 else "结论.md")
+OUT = os.path.join(BASE, sys.argv[2] if len(sys.argv) > 2 else "结论.pdf")
+HTML = os.path.join(BASE, "out", "_" + os.path.splitext(os.path.basename(OUT))[0] + ".html")
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 

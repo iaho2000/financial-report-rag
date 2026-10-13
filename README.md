@@ -20,8 +20,8 @@
 | 建**向量 + BM25** 两路索引 | 向量：bge-small-zh-v1.5（本地 CPU，24M 参数、512 维）；BM25：jieba 分词 |
 | 做一个**能提问、答案带出处**的页面 | `06_webapp.py`，Flask 本地网页 |
 | 出 10 道题，**至少 2 道跨公司全景题** | `08_eval.py`：8 道单公司 + 2 道跨公司 |
-| 逐题记录**召回哪些块、答对没有、错在哪** | `out/eval_raw.json` + `结论.md` |
-| 交付代码仓库、页面截图、一页结论 | `README.md` + `结论.md` + `截图/` |
+| 逐题记录**召回哪些块、答对没有、错在哪** | `out/10题评测记录.md`（由 `11_export_eval.py` 从 `out/eval_raw.json` 导出：每题写清报告/章节/页码、表格口径、模型原话、召回 top-8、判定与理由） |
+| 交付代码仓库、页面截图、一页结论（PDF） | `README.md` + `截图/` + `一页结论.pdf`（另附更早的 `结论.md` / `结论.pdf`） |
 
 ---
 
@@ -37,8 +37,9 @@
 │  └─ extra_chunks.jsonl  人工汇总的「速查表」块（14 块，见第四节）
 ├─ models/             bge-small-zh-v1.5（本地，96MB）
 ├─ 截图/               5 张页面截图（含 1 张答错的，见 结论.md 第三节）
-├─ 结论.md / 结论.pdf   一页结论（PDF 由 scripts/10_md_to_pdf.py 生成）
-└─ out/                评测结果、facts.json
+├─ 一页结论.md / .pdf   ★本次补交的一页结论（PDF 由 scripts/10_md_to_pdf.py 生成）
+├─ 结论.md / 结论.pdf   更早的详细版结论
+└─ out/                评测结果：10题评测记录.md（逐题）· eval_raw.json · facts.json
 ```
 
 脚本按编号顺序跑：
@@ -55,7 +56,8 @@
 | `07_facts.py` | 从「主要会计数据」抠标准答案，并生成速查表块 |
 | `08_eval.py` | 10 道题的评测 |
 | `09_check_facts.py` | 反查：换一个文本来源（直接读 PDF 整页）重抠一遍，和 07 对比 |
-| `10_md_to_pdf.py` | 把 `结论.md` 转成 `结论.pdf`（作业要交 PDF；本机没有 LibreOffice/pandoc，用 Edge 无头打印） |
+| `10_md_to_pdf.py` | md → PDF。默认 `结论.md`→`结论.pdf`，也可传参：`python 10_md_to_pdf.py 一页结论.md 一页结论.pdf`（本机没有 LibreOffice/pandoc，用 Edge 无头打印） |
+| `11_export_eval.py` | 把 `out/eval_raw.json` 导出成 `out/10题评测记录.md`：逐题写明报告/章节/页码、表格口径、模型原话、召回 top-8、判定与理由 |
 
 ## 三、怎么跑
 
@@ -68,8 +70,9 @@ python 07_facts.py           # 抠标准答案 + 生成速查表块 -> data/extr
 python 09_check_facts.py     # 反查 07 抠出来的数字（现为 0 处对不上）
 python 04_build_index.py     # 建索引（CPU 编码 13,617 块，约 10 分钟）
 python 06_webapp.py          # 打开 http://127.0.0.1:5000
-python 08_eval.py            # 跑评测
-python 10_md_to_pdf.py       # 结论.md -> 结论.pdf（交作业的附件）
+python 08_eval.py            # 跑评测 -> out/eval_raw.json
+python 11_export_eval.py     # 逐题记录 -> out/10题评测记录.md
+python 10_md_to_pdf.py 一页结论.md 一页结论.pdf   # 交作业的一页结论
 ```
 
 **顺序不能换**：`07` 必须在 `04` 之前跑。`04` 是把 `chunks.jsonl` 和
@@ -154,4 +157,15 @@ BM25、没进向量库，跨公司题会时灵时不灵。索引已存在时 `04
 
 ## 六、评测结果
 
-见 `结论.md`（一页）和 `out/eval_raw.json`（逐题原始记录）。
+**总账：10 题中 正确 8 题、部分正确 2 题（第 6、8 题）、错误 0 题。**
+
+- **逐题记录**：`out/10题评测记录.md` —— 每题写清：出自哪份报告、章节/页码、表格口径、
+  模型的实际回答（原文照录）、召回的 top-8 各块（来源 / 代码 / 章节 / 页码 / 融合分数）、
+  以及人工判定与理由。
+- **一页结论**：`一页结论.pdf`（1 页）。
+- **原始数据**：`out/eval_raw.json`（`08_eval.py` 的原始输出，是上面两份的材料）。
+- 更早的详细版：`结论.md` / `结论.pdf`。
+
+两处「部分正确」都不在数字本身：第 6 题是库里的速查表把年报原文的「不适用」
+改写成了「同比增长 3.09%」，第 8 题是召回打偏（命中了「变动原因」空白列所在的那张表，
+真正解释原因的段落没进 top-8）。两处都如实记在逐题记录里。
